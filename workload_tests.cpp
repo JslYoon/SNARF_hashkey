@@ -8,7 +8,6 @@
 #include <set>
 #include <ctime>
 #include <cstring>
-#include <random>
 using namespace std;
 using namespace std::chrono; 
 #include "include/snarf.cpp"
@@ -65,32 +64,52 @@ int main()
   uint64_t left_end=15000;
   uint64_t right_end=16000;
 
-
-  random_device rd; // obtain a random number from hardware
-  mt19937 gen(rd()); // seed the generator
-  uniform_int_distribution<> distr(1, 15); // define the range
-
-  // Iterate 100k times.
-  // For a random key K, we have a range query of [K+1, K+1001], and validate that the key K+1 will highly likely
-  // to be matched to K. We count the number of false positive
-
-  // Compare it with a case where given a random key K, we check for [K+2, K+1002], [K+3, K+1003], ... [K+K, K+1000+K]
-  // Graph it and show that keys close will match to similar keys
-  int fp = 0;
-  int tn = 0;
-  for (int i=0; i<10000; i++) {
-    
-    int K = distr(gen) * 1000;
-    snarf_instance.insert_key(K);
-    if(snarf_instance.range_query(K+1000, K+2000)) {
-      fp++;
-    } else {
-      tn++;
-    }
-    
+  //range query example
+  if(snarf_instance.range_query(left_end,right_end))
+  {
+    cout<<"False Positive for: [ "<<left_end<<", "<<right_end<<"]"<<endl;
   }
-  cout << "this is fp " << fp << " and this is tn: " << tn << endl;
+  else
+  {
+     cout<<"True Negative for: [ "<<left_end<<", "<<right_end<<"]"<<endl;
+  }
+
+  //Insert example
+  snarf_instance.insert_key(15000);
+  if(snarf_instance.range_query(left_end,right_end))
+  {
+    cout<<"True Positive for: [ "<<left_end<<", "<<right_end<<"]"<<endl;
+  }
+  else
+  {
+    //We won't reach here as false negatives do not occur in filters.
+     cout<<"False Negative for: [ "<<left_end<<", "<<right_end<<"]"<<endl;
+  }
+
+  //Delete example
+  snarf_instance.delete_key(15000);
+  if(snarf_instance.range_query(left_end,right_end))
+  {
+    cout<<"False Positive for: [ "<<left_end<<", "<<right_end<<"]"<<endl;
+  }
+  else
+  {
+     cout<<"True Negative for: [ "<<left_end<<", "<<right_end<<"]"<<endl;
+  }
+
+  uint64_t false_positive_left_end=10001;
+
+  //false positive example
+  if(snarf_instance.range_query(false_positive_left_end,right_end))
+  {
+    cout<<"False Positive for: [ "<<false_positive_left_end<<", "<<right_end<<"]"<<endl;
+  }
+  else
+  {
+     cout<<"True Negative for: [ "<<false_positive_left_end<<", "<<right_end<<"]"<<endl;
+  }
 
 
-  return 0;
+
+    return 0;
 }
