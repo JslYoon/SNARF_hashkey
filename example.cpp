@@ -74,7 +74,7 @@ bool find_key_in(const std::vector<uint64_t>& source_vec, uint64_t left_end, uin
 }
 
 // Function to test snarf
-void test_snarf(double bits_per_key, uint64_t batch_size, string key_distribution, string query_distribution) {
+void test_snarf(double bits_per_key, uint64_t batch_size, string key_distribution, string query_distribution, bool testK) {
   //----------------------------------------
   //GENERATING DATA
   //----------------------------------------
@@ -126,19 +126,17 @@ void test_snarf(double bits_per_key, uint64_t batch_size, string key_distributio
   //QUERYING SNARF
   //----------------------------------------
 
-  // SNARF suppports 3 main operations
-  // Range Query: checks the existence of keys in a range
-  // Insert: inserts the key
-  // Delete: deletes the key
-
   vector<uint64_t> rq_ranges({0, 16, 64, 256});
-  uint64_t fp = 0;
-  uint64_t tn = 0;
-  uint64_t tp = 0;
-  for(int j = 0; j < rq_ranges.size(); j++) {
-    for (int i = 0; i < test_queries.size(); i++) {
-      uint64_t lower_bound = test_queries[i];
-      uint64_t upper_bound = test_queries[i] + rq_ranges[j];
+  uint64_t fp;
+  uint64_t tn;
+  uint64_t tp;
+  for(int i = 0; i < rq_ranges.size(); i++) {
+    fp = 0;
+    tn = 0;
+    tp = 0;
+    for (int j = 0; j < test_queries.size(); j++) {
+      uint64_t lower_bound = test_queries[j];
+      uint64_t upper_bound = lower_bound + rq_ranges[i];
       if(snarf_instance.range_query(lower_bound, upper_bound)) {
         if(find_key_in(sorted_v_keys, lower_bound, upper_bound)) {
           tp++;
@@ -149,10 +147,36 @@ void test_snarf(double bits_per_key, uint64_t batch_size, string key_distributio
         tn++;
       }
     }    
-    cout << "this is fp " << fp << " and this is tn: " << tn << " and this is tp " << tp << " for rq_range of " << j << endl;
+    double rate = static_cast<double>(fp) / (fp + tn);
+    cout << "    The false positive rate overall for " << key_distribution << " keys and " << query_distribution << " queries with range "
+      << rq_ranges[i] <<  " is " << rate << endl;
   }
 
-  
+  //----------------------------------------
+  //SNARF WITH kEY K WE QUERY FROM K+1
+  //----------------------------------------
+  if(testK) {
+    for(int i = 0; i < rq_ranges.size(); i++) {
+      fp = 0;
+      tn = 0;
+      tp = 0;
+      for(int j = 0; j < sorted_v_keys.size(); j++) {
+        uint64_t lower_bound = sorted_v_keys[j] + 1;
+        uint64_t upper_bound = lower_bound + rq_ranges[i];
+        if(snarf_instance.range_query(lower_bound, upper_bound)) {
+          if(find_key_in(sorted_v_keys, lower_bound, upper_bound)) {
+            tp++;
+          } else {
+            fp++;
+          }
+        } else {
+          tn++;
+        }
+      }
+      double rate = static_cast<double>(fp) / (fp + tn);
+      cout << "    The false positive rate for K, K+1 queries with range" << rq_ranges[i] " is " << rate << endl;
+    }
+  }
 
 
 }
@@ -163,7 +187,22 @@ void test_snarf(double bits_per_key, uint64_t batch_size, string key_distributio
 
 int main() {
 
-  test_snarf(10.00, 100, "normal", "normal");
+  
+
+  vector<uint64_t> bits_per_key({6, 8, 10, 12, 14, 16, 18});
+  vector<string> key_dists({"normal", "uniform"});
+  vector<string> query_dists({"normal", "uniform", "exponential"});
+  bool testK;
+  for(int i = 0; i < bits_per_key.size(); i++) {
+    for(int j = 0; j < key_dists.size(); j++) {
+      testK = true;
+      for(int k = 0; k < query_dists.size(); k++) {
+        cout << "Testing for bits " << bits_per_key[i] << " with key distribution: " << key_dists[j] << " and query distribution: " << query_dists[k] << endl;
+        test_snarf(bits_per_key[i], 100.0,  key_dists[j], query_dists[k], testK);
+        testK = false;
+      }
+    }
+  }
 
   return 0;
 }
