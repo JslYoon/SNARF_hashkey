@@ -1,28 +1,29 @@
 #include<iostream>
 #include<algorithm>
 #include<cmath>
-#include <random>
 #include <fstream>
 #include <chrono>
 #include <set>
 #include <ctime>
 #include <cstring>
 #include <random>
+#include <limits>
+
 using namespace std;
 using namespace std::chrono;
 #include "include/snarf.cpp"
 
 // To get normal distribution
 vector<uint64_t> get_normal_distribution(uint64_t N, double mean, double stddev, uint64_t range_min, uint64_t range_max) {
-    std::vector<uint64_t> v_keys(N, 0);
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::normal_distribution<> dist(mean, stddev);
+    vector<uint64_t> v_keys(N, 0);
+    random_device rd;
+    mt19937 gen(rd());
+    normal_distribution<> dist(mean, stddev);
 
     for (uint64_t i = 0; i < N; i++) {
 
         double number = dist(gen);
-        v_keys[i] = std::min(std::max(range_min, static_cast<uint64_t>((number - mean) / stddev * (range_max - range_min) + (range_max + range_min) / 2)), range_max);
+        v_keys[i] = min(max(range_min, static_cast<uint64_t>((number - mean) / stddev * (range_max - range_min) + (range_max + range_min) / 2)), range_max);
     }
 
     return v_keys;
@@ -31,31 +32,32 @@ vector<uint64_t> get_normal_distribution(uint64_t N, double mean, double stddev,
 
 // To get uniform distribution
 vector<uint64_t> get_uniform_distribution(uint64_t N, uint64_t range_min, uint64_t range_max) {
-    std::vector<uint64_t> v_keys(N, 0);
-    std::random_device rd;
-    std::mt19937_64 gen(rd()); 
-    std::uniform_int_distribution<uint64_t> dist(range_min, range_max);
+    vector<uint64_t> v_keys(N, 0);
+    random_device rd;
+    mt19937_64 gen(rd()); 
+    uniform_int_distribution<uint64_t> dist(range_min, range_max);
 
     for (uint64_t i = 0; i < N; ++i) {
         v_keys[i] = dist(gen);
     }
+
     return v_keys;
 }
 
 // To get exponential distribution
-std::vector<uint64_t> get_exponential_distribution(uint64_t N, double lambda, uint64_t range_min, uint64_t range_max) {
-    std::vector<uint64_t> v_keys(N, 0);
-    std::random_device rd;
-    std::mt19937 gen(rd()); 
-    std::exponential_distribution<> dist(lambda);
+vector<uint64_t> get_exponential_distribution(uint64_t N, double lambda, uint64_t range_min, uint64_t range_max) {
+    vector<uint64_t> v_keys(N, 0);
+    random_device rd;
+    mt19937 gen(rd()); 
+    exponential_distribution<> dist(lambda);
 
-    double max_exp_value = std::log(range_max) / lambda;
+    double max_exp_value = log(range_max) / lambda;
     
     for (uint64_t i = 0; i < N; ++i) {
         double exp_value = dist(gen);
         
         
-        exp_value = std::min(max_exp_value, exp_value); 
+        exp_value = min(max_exp_value, exp_value); 
         double scale = exp_value / max_exp_value;
         v_keys[i] = range_min + static_cast<uint64_t>((range_max - range_min) * scale);
     }
@@ -63,8 +65,8 @@ std::vector<uint64_t> get_exponential_distribution(uint64_t N, double lambda, ui
 }
 
 // Function to find if a query performs a false positive or not; it checks if a value exists within a certain range in source_vec
-bool find_key_in(const std::vector<uint64_t>& source_vec, uint64_t left_end, uint64_t right_end) {
-    auto lower = std::lower_bound(source_vec.begin(), source_vec.end(), left_end);
+bool find_key_in(const vector<uint64_t>& source_vec, uint64_t left_end, uint64_t right_end) {
+    auto lower = lower_bound(source_vec.begin(), source_vec.end(), left_end);
 
     if (lower != source_vec.end() && *lower <= right_end) {
         return true; // Found a value within the range
@@ -73,13 +75,15 @@ bool find_key_in(const std::vector<uint64_t>& source_vec, uint64_t left_end, uin
     return false; // No values found within the range
 }
 
+
+
 // Function to test snarf
-void test_snarf(double bits_per_key, uint64_t batch_size, string key_distribution, string query_distribution, bool testK) {
+void test_snarf(double bits_per_key, uint64_t batch_size, string key_distribution, string query_distribution, uint64_t test_num, uint64_t N) {
+
   //----------------------------------------
   //GENERATING DATA
   //----------------------------------------
 
-  uint64_t N=100'000'000;  
   vector<uint64_t> v_keys;
 
   if (key_distribution == "uniform") { // uniform distribution
@@ -130,6 +134,7 @@ void test_snarf(double bits_per_key, uint64_t batch_size, string key_distributio
   uint64_t fp;
   uint64_t tn;
   uint64_t tp;
+  double all_rate = 0;
   for(int i = 0; i < rq_ranges.size(); i++) {
     fp = 0;
     tn = 0;
@@ -148,61 +153,154 @@ void test_snarf(double bits_per_key, uint64_t batch_size, string key_distributio
       }
     }    
     double rate = static_cast<double>(fp) / (fp + tn);
-    cout << "    The false positive rate overall for " << key_distribution << " keys and " << query_distribution << " queries with range "
-      << rq_ranges[i] <<  " is " << rate << endl;
+    all_rate += rate;
   }
+  all_rate = all_rate / rq_ranges.size();
+  cout << "    The false positive rate overall for mixed range query " << key_distribution << " keys and " << query_distribution << " is " << all_rate << endl;
+
 
   //----------------------------------------
-  //SNARF WITH kEY K WE QUERY FROM K+1
+  //SNARF WITH kEY K WE QUERY FROM K+(TEST_NUM)
   //----------------------------------------
-  if(testK) {
-    for(int i = 0; i < rq_ranges.size(); i++) {
-      fp = 0;
-      tn = 0;
-      tp = 0;
-      for(int j = 0; j < sorted_v_keys.size(); j++) {
-        uint64_t lower_bound = sorted_v_keys[j] + 1;
-        uint64_t upper_bound = lower_bound + rq_ranges[i];
-        if(snarf_instance.range_query(lower_bound, upper_bound)) {
-          if(find_key_in(sorted_v_keys, lower_bound, upper_bound)) {
-            tp++;
-          } else {
-            fp++;
-          }
+  uint64_t TEST_NUM = test_num;
+  all_rate = 0;
+  for(int i = 0; i < rq_ranges.size(); i++) {
+    fp = 0;
+    tn = 0;
+    tp = 0;
+    for(int j = 0; j < sorted_v_keys.size(); j++) {
+      uint64_t lower_bound = sorted_v_keys[j] + TEST_NUM;
+      uint64_t upper_bound = lower_bound + rq_ranges[i];
+      if(snarf_instance.range_query(lower_bound, upper_bound)) {
+
+        if(find_key_in(sorted_v_keys, lower_bound, upper_bound)) {
+          tp++;
         } else {
-          tn++;
+          fp++;
         }
+
+      } else {
+        tn++;
       }
-      double rate = static_cast<double>(fp) / (fp + tn);
-      cout << "    The false positive rate for K, K+1 queries with range" << rq_ranges[i] " is " << rate << endl;
     }
+    double rate = static_cast<double>(fp) / (fp + tn);
+    all_rate += rate;
   }
+  all_rate = all_rate / rq_ranges.size();
+  cout << "    The false positive rate for K, K+" << test_num << " queries is " << all_rate << endl;
+
 
 
 }
 
 
-
-
-
-int main() {
-
-  
-
-  vector<uint64_t> bits_per_key({6, 8, 10, 12, 14, 16, 18});
-  vector<string> key_dists({"normal", "uniform"});
-  vector<string> query_dists({"normal", "uniform", "exponential"});
-  bool testK;
-  for(int i = 0; i < bits_per_key.size(); i++) {
-    for(int j = 0; j < key_dists.size(); j++) {
-      testK = true;
-      for(int k = 0; k < query_dists.size(); k++) {
-        cout << "Testing for bits " << bits_per_key[i] << " with key distribution: " << key_dists[j] << " and query distribution: " << query_dists[k] << endl;
-        test_snarf(bits_per_key[i], 100.0,  key_dists[j], query_dists[k], testK);
-        testK = false;
-      }
-    }
+// Helper function for interface display
+template<typename T>
+uint64_t display_select_vec(vector<T>& vec) {
+  uint64_t num = 0;
+  bool is_valid = false;
+  for(int i = 1; i <= vec.size(); i++) { // display vec
+    cout << i << ". " << vec[i-1] << endl;
   }
 
+  while(!is_valid) { // input loop
+    cout << "Choose an option (1 to " << vec.size() << "): ";  
+    if (cin >> num && num > 0 && num <= vec.size()) { 
+      is_valid = true; 
+    } else {
+      cout << "Invalid input." << endl;
+      cin.clear(); 
+      cin.ignore(numeric_limits<streamsize>::max(), '\n'); 
+
+    }
+  }
+  return num;
+}
+
+// Until valid number
+uint64_t until_number_input(uint64_t min, uint64_t max) {
+  
+  uint64_t number;
+    std::cout << "Enter a number between " << min << " and " << max << ": ";
+    while (true) {
+        if (std::cin >> number) {
+            if (number >= min && number <= max) {
+                break;  
+            } else {
+                std::cout << "Please enter a number within the range " << min << " to " << max << ": ";
+            }
+        } else {
+            cout << "Invalid input." << endl;
+            cin.clear();  
+            cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); 
+        }
+    }
+    return number;
+}
+        
+
+
+
+
+int main() {  
+
+  // Testable options
+  vector<uint64_t> bits_per_keys({6, 8, 10, 12, 14, 16, 18});
+  vector<string> key_dists({"normal", "uniform"});
+  vector<string> query_dists({"normal", "uniform", "exponential"});
+  vector<string> interface_options({"Start test", "Choose key distribution", "Choose query distribution", "Choose bits per key", "Choose K, K+n", "Choose number of tests", "Exit test"});
+
+  string key_dist = "normal";
+  string query_dist = "normal";
+  uint64_t bits_per_key = 8;
+  uint64_t test_num = 1;  
+  uint64_t N=10'000'000;  
+
+ 
+  cout << "Welcome to SNARF test!" << endl;
+  while(true) {
+
+    cout << endl << "----------------------------------------------" << endl
+      << "Current options" << endl
+      << "  Number of tests: " << N << endl
+      << "  Key distribution: " << key_dist << endl
+      << "  Query distribution: " << query_dist << endl
+      << "  Bits per key: " << bits_per_key << endl
+      << "  Testing for K, K+" << test_num << endl
+      << "----------------------------------------------" << endl << endl;
+
+    switch(display_select_vec(interface_options)) {
+      case 1: // Start test
+        cout << endl;
+        test_snarf(bits_per_key, 100.0,  key_dist,query_dist, test_num, N);
+        break;
+
+      case 2: // Choose key distribution
+        key_dist = key_dists[display_select_vec(key_dists)-1];
+        break;
+
+      case 3: // Choose query distribution
+        query_dist = query_dists[display_select_vec(query_dists)-1];
+        break;
+
+      case 4: // Choose bits per key
+        bits_per_key = bits_per_keys[display_select_vec(bits_per_keys)-1];
+        break;
+      
+      case 5: // Choose K, K+n
+        test_num = until_number_input(100000, N);
+        break;
+
+      case 6: // Choose N
+        N = until_number_input(0, 100'000'000);
+        break;
+
+      case 7: // Exit
+        cout << "Goodbye!" << endl;
+        return 0;
+
+    }
+  }
+  
   return 0;
 }
