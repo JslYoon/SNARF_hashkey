@@ -15,18 +15,24 @@ using namespace std::chrono;
 
 // To get normal distribution
 vector<uint64_t> get_normal_distribution(uint64_t N, double mean, double stddev, uint64_t range_min, uint64_t range_max) {
-    vector<uint64_t> v_keys(N, 0);
-    random_device rd;
-    mt19937 gen(rd());
-    normal_distribution<> dist(mean, stddev);
 
-    for (uint64_t i = 0; i < N; i++) {
+    std::vector<uint64_t> results;
+    results.reserve(N); 
 
-        double number = dist(gen);
-        v_keys[i] = min(max(range_min, static_cast<uint64_t>((number - mean) / stddev * (range_max - range_min) + (range_max + range_min) / 2)), range_max);
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::normal_distribution<> dist(mean, stddev);
+
+    for (size_t i = 0; i < N; ++i) {
+        double number;
+        do {
+            number = dist(gen);
+            number = (number - mean) / (4 * stddev) * (range_max - range_min) + (range_min + range_max) / 2.0;
+        } while (number < range_min || number > range_max); // Repeat if the number is outside the range
+
+        results.push_back(static_cast<uint64_t>(number));
     }
-
-    return v_keys;
+    return results;
 }
 
 
@@ -78,7 +84,7 @@ bool find_key_in(const vector<uint64_t>& source_vec, uint64_t left_end, uint64_t
 
 
 // Function to test snarf
-void test_snarf(double bits_per_key, uint64_t batch_size, string key_distribution, string query_distribution, uint64_t test_num, uint64_t N) {
+void test_snarf(double bits_per_key, uint64_t batch_size, string key_distribution, string query_distribution, uint64_t test_num, uint64_t N, bool special, string query_option) {
 
   //----------------------------------------
   //GENERATING DATA
@@ -110,20 +116,21 @@ void test_snarf(double bits_per_key, uint64_t batch_size, string key_distributio
   int snarf_sz=snarf_instance.return_size();
   cout<<"Bits per key used by SNARF: "<<snarf_sz*8.00/v_keys.size()<<endl;
   
-
   //----------------------------------------
   //BUILDING WORKLOAD
   //----------------------------------------
 
   vector<uint64_t> test_queries;
-  if (query_distribution == "uniform") { // uniform distribution
-    test_queries = get_uniform_distribution(N, 0, static_cast<uint64_t>(pow(2, 50))-1);
+  if(!special){
+    if (query_distribution == "uniform") { // uniform distribution
+      test_queries = get_uniform_distribution(N, 0, static_cast<uint64_t>(pow(2, 50))-1);
 
-  } else if (query_distribution == "normal") { // normal distribution
-    test_queries = get_normal_distribution(N, 100.0, 20.0, 0, static_cast<uint64_t>(pow(2, 50))-1);
+    } else if (query_distribution == "normal") { // normal distribution
+      test_queries = get_normal_distribution(N, 100.0, 20.0, 0, static_cast<uint64_t>(pow(2, 50))-1);
 
-  } else if (query_distribution == "exponential") { // exponential distribution
-    test_queries = get_exponential_distribution(N, 10.0, 0, static_cast<uint64_t>(pow(2, 50))-1);
+    } else if (query_distribution == "exponential") { // exponential distribution
+      test_queries = get_exponential_distribution(N, 10.0, 0, static_cast<uint64_t>(pow(2, 50))-1);
+    }
   }
 
   //----------------------------------------
@@ -135,29 +142,30 @@ void test_snarf(double bits_per_key, uint64_t batch_size, string key_distributio
   uint64_t tn;
   uint64_t tp;
   double all_rate = 0;
-  for(int i = 0; i < rq_ranges.size(); i++) {
-    fp = 0;
-    tn = 0;
-    tp = 0;
-    for (int j = 0; j < test_queries.size(); j++) {
-      uint64_t lower_bound = test_queries[j];
-      uint64_t upper_bound = lower_bound + rq_ranges[i];
-      if(snarf_instance.range_query(lower_bound, upper_bound)) {
-        if(find_key_in(sorted_v_keys, lower_bound, upper_bound)) {
-          tp++;
+  if(!special && (query_option == "all")) {
+    for(int i = 0; i < rq_ranges.size(); i++) {
+      fp = 0;
+      tn = 0;
+      tp = 0;
+      for (int j = 0; j < test_queries.size(); j++) {
+        uint64_t lower_bound = test_queries[j];
+        uint64_t upper_bound = lower_bound + rq_ranges[i];
+        if(snarf_instance.range_query(lower_bound, upper_bound)) {
+          if(find_key_in(sorted_v_keys, lower_bound, upper_bound)) {
+            tp++;
+          } else {
+            fp++;
+          }
         } else {
-          fp++;
+          tn++;
         }
-      } else {
-        tn++;
-      }
-    }    
-    double rate = static_cast<double>(fp) / (fp + tn);
-    all_rate += rate;
+      }    
+      double rate = static_cast<double>(fp) / (fp + tn);
+      all_rate += rate;
+    }
+    all_rate = all_rate / rq_ranges.size();
+    cout << "    The false positive rate overall for mixed range query " << key_distribution << " keys and " << query_distribution << " is " << all_rate << endl;
   }
-  all_rate = all_rate / rq_ranges.size();
-  cout << "    The false positive rate overall for mixed range query " << key_distribution << " keys and " << query_distribution << " is " << all_rate << endl;
-
 
   //----------------------------------------
   //SNARF WITH kEY K WE QUERY FROM K+(TEST_NUM)
@@ -169,8 +177,15 @@ void test_snarf(double bits_per_key, uint64_t batch_size, string key_distributio
     tn = 0;
     tp = 0;
     for(int j = 0; j < sorted_v_keys.size(); j++) {
-      uint64_t lower_bound = sorted_v_keys[j] + TEST_NUM;
-      uint64_t upper_bound = lower_bound + rq_ranges[i];
+      uint64_t lower_bound;
+      uint64_t upper_bound;
+      if(!special) {
+        lower_bound = sorted_v_keys[j] + TEST_NUM;
+        upper_bound = lower_bound + rq_ranges[i];
+      } else {
+        upper_bound = sorted_v_keys[j] - TEST_NUM;
+        lower_bound = upper_bound - rq_ranges[i];
+      }
       if(snarf_instance.range_query(lower_bound, upper_bound)) {
 
         if(find_key_in(sorted_v_keys, lower_bound, upper_bound)) {
@@ -248,10 +263,12 @@ int main() {
   vector<uint64_t> bits_per_keys({6, 8, 10, 12, 14, 16, 18});
   vector<string> key_dists({"normal", "uniform"});
   vector<string> query_dists({"normal", "uniform", "exponential"});
-  vector<string> interface_options({"Start test", "Choose key distribution", "Choose query distribution", "Choose bits per key", "Choose K, K+n", "Choose number of tests", "Exit test"});
+  vector<string> query_options({"all", "close-K"});
+  vector<string> interface_options({"Start test", "Choose key distribution", "Choose query distribution", "Choose bits per key", "Choose K, K+n", "Choose number of tests", "Change query options", "Special Case: K-n, K-1", "Exit test"});
 
   string key_dist = "normal";
   string query_dist = "normal";
+  string query_option = "all";
   uint64_t bits_per_key = 8;
   uint64_t test_num = 1;  
   uint64_t N=10'000'000;  
@@ -267,12 +284,13 @@ int main() {
       << "  Query distribution: " << query_dist << endl
       << "  Bits per key: " << bits_per_key << endl
       << "  Testing for K, K+" << test_num << endl
+      << "  Query option testing for " << query_option << endl
       << "----------------------------------------------" << endl << endl;
 
     switch(display_select_vec(interface_options)) {
       case 1: // Start test
         cout << endl;
-        test_snarf(bits_per_key, 100.0,  key_dist,query_dist, test_num, N);
+        test_snarf(bits_per_key, 100.0,  key_dist,query_dist, test_num, N, false, query_option);
         break;
 
       case 2: // Choose key distribution
@@ -288,14 +306,22 @@ int main() {
         break;
       
       case 5: // Choose K, K+n
-        test_num = until_number_input(100000, N);
+        test_num = until_number_input(1, N);
         break;
 
       case 6: // Choose N
         N = until_number_input(0, 100'000'000);
         break;
 
-      case 7: // Exit
+      case 7: // Change query option
+        query_option = query_options[display_select_vec(query_options)-1];
+        break;
+
+      case 8: // K-n, K-1 case
+        test_snarf(bits_per_key, 100.0,  key_dist,query_dist, test_num, N, true, "all");
+        break;
+
+      case 9: // Exit
         cout << "Goodbye!" << endl;
         return 0;
 
