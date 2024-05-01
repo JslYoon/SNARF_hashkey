@@ -310,4 +310,3 @@ struct snarf_model
 
 
 };
-

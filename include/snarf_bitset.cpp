@@ -153,4 +153,3 @@ struct snarf_bitset
 
 
 };
-

@@ -11,7 +11,8 @@
 
 using namespace std;
 using namespace std::chrono;
-#include "include/snarf.cpp"
+
+#include "include/snarf_hash.cpp"
 
 // To get normal distribution
 vector<uint64_t> get_normal_distribution(uint64_t N, double mean, double stddev, uint64_t range_min, uint64_t range_max) {
@@ -84,7 +85,8 @@ bool find_key_in(const vector<uint64_t>& source_vec, uint64_t left_end, uint64_t
 
 
 // Function to test snarf
-void test_snarf(double bits_per_key, uint64_t batch_size, string key_distribution, string query_distribution, uint64_t test_num, uint64_t N, bool special, string query_option) {
+void test_snarf(double bits_per_key, uint64_t batch_size, string key_distribution, string query_distribution, 
+                  uint64_t test_num, uint64_t N, bool special, string query_option, uint64_t num_hash_bits) {
 
   //----------------------------------------
   //GENERATING DATA
@@ -109,8 +111,9 @@ void test_snarf(double bits_per_key, uint64_t batch_size, string key_distributio
   //----------------------------------------
   
   //declare and initialize a snarf instance
-  snarf_updatable_gcs<uint64_t> snarf_instance;
-  snarf_instance.snarf_init(v_keys,bits_per_key,batch_size);
+  snarf_updatable_gcs_hash<uint64_t> snarf_instance;
+  // snarf_updatable_gcs_hash<uint64_t> snarf_instance;
+  snarf_instance.snarf_init(v_keys,bits_per_key,batch_size, num_hash_bits);
     
   //get the size of the snarf instance
   int snarf_sz=snarf_instance.return_size();
@@ -142,7 +145,9 @@ void test_snarf(double bits_per_key, uint64_t batch_size, string key_distributio
   uint64_t tn;
   uint64_t tp;
   double all_rate = 0;
+  
   if(!special && (query_option == "all")) {
+    auto start = std::chrono::high_resolution_clock::now();
     for(int i = 0; i < rq_ranges.size(); i++) {
       fp = 0;
       tn = 0;
@@ -163,8 +168,11 @@ void test_snarf(double bits_per_key, uint64_t batch_size, string key_distributio
       double rate = static_cast<double>(fp) / (fp + tn);
       all_rate += rate;
     }
+    auto stop = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
     all_rate = all_rate / rq_ranges.size();
-    cout << "    The false positive rate overall for mixed range query " << key_distribution << " keys and " << query_distribution << " is " << all_rate << endl;
+    cout << "    The false positive rate overall for mixed range query " << key_distribution << " keys and " << query_distribution << " is " << all_rate <<
+          " and it took " << duration.count() << " milliseconds" << endl;
   }
 
   //----------------------------------------
@@ -172,11 +180,13 @@ void test_snarf(double bits_per_key, uint64_t batch_size, string key_distributio
   //----------------------------------------
   uint64_t TEST_NUM = test_num;
   all_rate = 0;
+  auto start = std::chrono::high_resolution_clock::now();
   for(int i = 0; i < rq_ranges.size(); i++) {
     fp = 0;
     tn = 0;
     tp = 0;
     for(int j = 0; j < sorted_v_keys.size(); j++) {
+
       uint64_t lower_bound;
       uint64_t upper_bound;
       if(!special) {
@@ -201,8 +211,10 @@ void test_snarf(double bits_per_key, uint64_t batch_size, string key_distributio
     double rate = static_cast<double>(fp) / (fp + tn);
     all_rate += rate;
   }
+  auto stop = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
   all_rate = all_rate / rq_ranges.size();
-  cout << "    The false positive rate for K, K+" << test_num << " queries is " << all_rate << endl;
+  cout << "    The false positive rate for close-K " << test_num << " queries is " << all_rate <<  " and it took " << duration.count() << " milliseconds" << endl;
 
 
 
@@ -264,7 +276,10 @@ int main() {
   vector<string> key_dists({"normal", "uniform"});
   vector<string> query_dists({"normal", "uniform", "exponential"});
   vector<string> query_options({"all", "close-K"});
-  vector<string> interface_options({"Start test", "Choose key distribution", "Choose query distribution", "Choose bits per key", "Choose K, K+n", "Choose number of tests", "Change query options", "Special Case: K-n, K-1", "Exit test"});
+  vector<string> interface_options({"Start test", "Choose key distribution", "Choose query distribution", "Choose bits per key", 
+                                      "Choose K, K+n", "Choose number of tests", "Change query options", "Special Case: K-n, K-1", 
+                                        "Change bits per keys allocated to hashing (*)", "Exit test"});
+  uint64_t num_hash_bits = 6;
 
   string key_dist = "normal";
   string query_dist = "normal";
@@ -285,12 +300,14 @@ int main() {
       << "  Bits per key: " << bits_per_key << endl
       << "  Testing for K, K+" << test_num << endl
       << "  Query option testing for " << query_option << endl
+      << "  Hashing memory allocated: " << num_hash_bits << " bits" << endl
       << "----------------------------------------------" << endl << endl;
 
     switch(display_select_vec(interface_options)) {
       case 1: // Start test
         cout << endl;
-        test_snarf(bits_per_key, 100.0,  key_dist,query_dist, test_num, N, false, query_option);
+        // string s = snarf_options[display_select_vec(snarf_options)];
+        test_snarf(bits_per_key, 100.0,  key_dist,query_dist, test_num, N, false, query_option, num_hash_bits);
         break;
 
       case 2: // Choose key distribution
@@ -310,7 +327,7 @@ int main() {
         break;
 
       case 6: // Choose N
-        N = until_number_input(0, 100'000'000);
+        N = until_number_input(100000, 100'000'000);
         break;
 
       case 7: // Change query option
@@ -318,10 +335,15 @@ int main() {
         break;
 
       case 8: // K-n, K-1 case
-        test_snarf(bits_per_key, 100.0,  key_dist,query_dist, test_num, N, true, "all");
+        // string s = snarf_options[display_select_vec(snarf_options)];
+        test_snarf(bits_per_key, 100.0,  key_dist,query_dist, test_num, N, true, "all", num_hash_bits);
         break;
 
-      case 9: // Exit
+      case 9: // change bits per hashing
+        num_hash_bits = until_number_input(0,32);
+        break;
+
+      case 10: // Exit
         cout << "Goodbye!" << endl;
         return 0;
 

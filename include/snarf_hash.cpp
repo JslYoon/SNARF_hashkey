@@ -7,15 +7,20 @@
 #include <set>
 #include <ctime>
 #include <cstring>
+
+#include <functional>
+
+
 using namespace std;
 using namespace std::chrono; 
 
 #include "snarf_model.cpp"
 #include "snarf_bitset.cpp"
+#include "bloom_filter.cpp"
 
 //SNARF implementation which is updatable(handles deletes and inserts) and uses Golomb Coding(GCS)
 template <class T>
-struct snarf_updatable_gcs
+struct snarf_updatable_gcs_hash
 {
   //Snarf model
   snarf_model<T> rmi;
@@ -26,6 +31,8 @@ struct snarf_updatable_gcs
   //Parameters used in snarf
   uint64_t N,P,block_size,bit_size,total_blocks;
   uint64_t gcs_size;
+
+  unordered_map<uint64_t, uint64_t> map_hash;
 
   //Stores the number of keys in each bit array block
   vector<int> vec_num_keys;
@@ -42,11 +49,14 @@ struct snarf_updatable_gcs
   uint64_t delta_query_one_count=0;
   double query_cdf1,query_cdf2=0.0;
 
+
+  hash<T> hasher; // new1
+  BloomFilter bf; // For storing the hash values
+
   //Name of snarf instance
   char name_curr;
 
-  snarf_updatable_gcs<T>(){
-
+  snarf_updatable_gcs_hash<T>(): bf(){
     N=0;
     P=0;
     block_size=0;
@@ -170,12 +180,11 @@ struct snarf_updatable_gcs
 
   
   //initialize snarf 
-  void snarf_init(vector<T> &keys,double bits_per_key,int num_ele_per_block)
+  void snarf_init(vector<T> &keys,double bits_per_key,int num_ele_per_block, int num_hash_bits)
   {
 
     bool testbool = (bits_per_key>3);
     assert(("Bits per Key are too low!", testbool));
-
     double target_fpr=pow(0.5,bits_per_key-3.0);
     //Set parameter values
     N=keys.size();
@@ -202,8 +211,11 @@ struct snarf_updatable_gcs
 
     //Build bit blocks using the set bit location values
     gcs_size=build_bb(temp_locations);
-
-
+    
+    bf.BloomFilter_init(num_hash_bits * keys.size(), 10);
+    for(int i = 0; i < keys.size(); i++) {
+      bf.add(keys[i]);
+    }
     return ;
   }
 
@@ -310,7 +322,6 @@ struct snarf_updatable_gcs
 
   }
 
-
   //checks if there is a value in a certain block(var bb_temp) that is between low_val and upper_val
   bool range_query_in_block(uint64_t low_val,uint64_t upper_val,snarf_bitset &bb_temp,int num_keys_read)
   {
@@ -320,6 +331,7 @@ struct snarf_updatable_gcs
 
     int bit_val;
     uint64_t temp;
+
     for(int i=0;i<num_keys;i++)
     {
       bit_val=bb_temp.bitset_read_bit(offset_dense_itr,1);
@@ -329,8 +341,9 @@ struct snarf_updatable_gcs
         //calculate the value
         temp=delta_zero_count*P+bb_temp.bitset_read_bits(offset_sparse_itr,bit_size);
         
+        
         //value is between the range
-        if(temp>=low_val && temp<=upper_val)
+        if(temp>=low_val && temp<=upper_val) // new1
         {
           return true;
         }
@@ -360,8 +373,9 @@ struct snarf_updatable_gcs
 
     delta_query_index=floor(temp_loc_upper*1.00/(block_size*P));
     delta_query_remainder=temp_loc_upper-delta_query_index*block_size*P;
-   
+    bf.add(key);
     insert_in_block(delta_query_remainder,delta_query_index);
+
    
     return;
 
@@ -381,17 +395,36 @@ struct snarf_updatable_gcs
 
     delete_from_block(delta_query_remainder,delta_query_index);
 
+
     return;
 
   }
+
+  bool verify_key(T key) {
+    return bf.possiblyContains(key);
+  }
+
+
+  uint64_t calculate_endpoints(T val) {
+    uint64_t tl123;
+    double ahahaha = rmi.infer(val);
+    tl123=floor(ahahaha*N*P);
+    tl123=min(N*P-1,max((uint64_t)0,tl123));
+    // return tl123-floor(tl123*1.00/(block_size*P))*block_size*P;
+    return tl123;
+
+  }
+
  
   //finds the bit location corresponding to the query endpoints and checks the corresponding block or blocks for a value
   bool range_query(T lower_val,T upper_val)
   {
     uint64_t temp_loc_lower,temp_loc_upper,large_delta_query_index;
-
+    uint64_t bit_adjst = 1;
+   
     query_cdf1=rmi.infer(upper_val);
     query_cdf2=rmi.infer(lower_val);
+
 
     temp_loc_upper=floor(query_cdf1*N*P);
     temp_loc_upper=min(N*P-1,max((uint64_t)0,temp_loc_upper));
@@ -403,15 +436,46 @@ struct snarf_updatable_gcs
     delta_query_index=floor(temp_loc_lower*1.00/(block_size*P));
     large_delta_query_index=floor(temp_loc_upper*1.00/(block_size*P));
 
-    //in case the query endpoints are  in two different blocks we need to query multiple times
+
+
+
+    //in case the query endpoints are in two different blocks we need to query multiple times
     if(delta_query_index==large_delta_query_index)
     {
-      return range_query_in_block(temp_loc_lower-delta_query_index*block_size*P,temp_loc_upper-delta_query_index*block_size*P,bb_bitset_vec[delta_query_index],vec_num_keys[delta_query_index]);
-    }
+      uint64_t low_val1 = temp_loc_lower-delta_query_index*block_size*P;
+      uint64_t up_val1 =  temp_loc_upper-delta_query_index*block_size*P;
+
+      if (range_query_in_block(low_val1, up_val1, bb_bitset_vec[delta_query_index], vec_num_keys[delta_query_index])) {
+
+        if(!verify_key(lower_val)) {
+          uint64_t tempnew1 = calculate_endpoints(lower_val);
+          uint64_t tempnew_val1 = tempnew1 -  (floor(tempnew1*1.00/(block_size*P)) * block_size * P);
+
+          while(tempnew_val1 <= low_val1) {
+            lower_val+=1;
+            tempnew1 = calculate_endpoints(lower_val);
+            tempnew_val1 = tempnew1 - (floor(tempnew1*1.00/(block_size*P)) * block_size * P);
+            if(verify_key(lower_val)) {
+              break;
+            }
+            if(tempnew_val1 >= up_val1) {
+              return range_query_in_block(tempnew_val1 - 1, up_val1 ,bb_bitset_vec[delta_query_index], vec_num_keys[delta_query_index]);
+            }
+          }
+          return range_query_in_block(tempnew_val1, up_val1 ,bb_bitset_vec[delta_query_index], vec_num_keys[delta_query_index]);
+        } else {
+            return true;
+        }
+
+      }
+      return false;
+  }
+    
     else
     {
       if(range_query_in_block(temp_loc_lower-delta_query_index*block_size*P-1,block_size*P+1,bb_bitset_vec[delta_query_index],vec_num_keys[delta_query_index]))
       {
+
         return true;
       }
 
@@ -456,6 +520,8 @@ struct snarf_updatable_gcs
     {
       total_size+=bb_bitset_vec[i].return_size();
     }
+
+    total_size += bf.return_size(); // for hashing storage
 
     return total_size;
   }
