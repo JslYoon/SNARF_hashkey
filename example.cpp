@@ -205,6 +205,8 @@ void test_snarf(double bits_per_key, uint64_t batch_size, string key_distributio
         }
 
       } else {
+          if(find_key_in(sorted_v_keys, lower_bound, upper_bound)) {
+        } 
         tn++;
       }
     }

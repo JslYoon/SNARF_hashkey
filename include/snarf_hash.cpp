@@ -459,7 +459,8 @@ struct snarf_updatable_gcs_hash
               break;
             }
             if(tempnew_val1 >= up_val1) {
-              return range_query_in_block(tempnew_val1 - 1, up_val1 ,bb_bitset_vec[delta_query_index], vec_num_keys[delta_query_index]);
+              return false;
+              // return range_query_in_block(tempnew_val1 - 1, up_val1 ,bb_bitset_vec[delta_query_index], vec_num_keys[delta_query_index]);
             }
           }
           return range_query_in_block(tempnew_val1, up_val1 ,bb_bitset_vec[delta_query_index], vec_num_keys[delta_query_index]);
